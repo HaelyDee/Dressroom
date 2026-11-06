@@ -1,0 +1,579 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="출근 전 날씨">
+<meta name="color-scheme" content="dark">
+<title>출근 전 날씨</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;500;600&family=IBM+Plex+Sans+KR:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* 레이아웃: 1024x768 가로. 왼쪽 열은 시계와 현재 날씨, 오른쪽 열은 우천 예보와 옷차림, 아래는 12시간 예보 */
+:root {
+  --u: min(0.09765625vw, 0.1302083vh);
+  --bg: #0b1015;
+  --panel: #131b23;
+  --line: #243241;
+  --fg: #eaf0f5;
+  --muted: #8c9cab;
+  --dim: #566574;
+  --rain: #52b6ff;
+  --rain-bg: rgba(82, 182, 255, 0.14);
+  --rain-line: rgba(82, 182, 255, 0.5);
+  --cool: #86b9ff;
+  --warm: #ffb865;
+  --warn: #ffb865;
+  --display: 'Barlow Condensed', 'Arial Narrow', 'Helvetica Neue', sans-serif;
+  --body: 'IBM Plex Sans KR', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--body);
+  -webkit-text-size-adjust: 100%;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  touch-action: manipulation;
+  overscroll-behavior: none;
+}
+body { position: fixed; inset: 0; width: 100%; overflow: hidden; transition: filter 1.5s; }
+body.night { filter: brightness(0.45); }
+
+.app {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  gap: calc(var(--u) * 16);
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr calc(var(--u) * 212);
+  grid-template-areas: "clock rain" "now outfit" "hourly hourly";
+  padding-top: max(calc(var(--u) * 26), env(safe-area-inset-top, 0px));
+  padding-bottom: max(calc(var(--u) * 26), env(safe-area-inset-bottom, 0px));
+  padding-left: max(calc(var(--u) * 30), env(safe-area-inset-left, 0px));
+  padding-right: max(calc(var(--u) * 30), env(safe-area-inset-right, 0px));
+}
+.app > section { min-width: 0; min-height: 0; }
+.panel {
+  background: var(--panel);
+  border-radius: calc(var(--u) * 18);
+  overflow: hidden;
+}
+.label {
+  font-size: calc(var(--u) * 21);
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 12);
+  white-space: nowrap;
+}
+.tag {
+  font-size: calc(var(--u) * 18);
+  letter-spacing: 0;
+  padding: calc(var(--u) * 2) calc(var(--u) * 10);
+  border-radius: 999px;
+  background: var(--rain);
+  color: #06202f;
+  font-weight: 600;
+}
+
+/* 시계 */
+.clock { grid-area: clock; display: flex; flex-direction: column; justify-content: flex-end; gap: calc(var(--u) * 6); }
+.time {
+  font-family: var(--display);
+  font-weight: 500;
+  font-size: calc(var(--u) * 172);
+  line-height: 0.9;
+  max-width: 100%;
+  overflow: hidden;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.colon { animation: blink 2s steps(1, end) infinite; position: relative; top: -0.04em; }
+@keyframes blink { 0% { opacity: 1; } 50% { opacity: 0.25; } }
+.dateline { display: flex; align-items: baseline; justify-content: space-between; gap: calc(var(--u) * 12); }
+.date { font-size: calc(var(--u) * 38); font-weight: 500; white-space: nowrap; }
+.date b { font-weight: 600; color: var(--fg); }
+.date span { color: var(--muted); }
+.meta { font-size: calc(var(--u) * 18); color: var(--dim); white-space: nowrap; display: flex; align-items: center; gap: calc(var(--u) * 8); }
+.meta.fail { color: var(--warn); }
+.dot { width: calc(var(--u) * 9); height: calc(var(--u) * 9); border-radius: 50%; background: currentColor; display: inline-block; }
+
+/* 현재 날씨 */
+.now { grid-area: now; display: flex; flex-direction: column; justify-content: flex-end; gap: calc(var(--u) * 10); }
+.now .row { display: flex; align-items: center; gap: calc(var(--u) * 22); }
+.temp { font-family: var(--display); font-weight: 500; font-size: calc(var(--u) * 150); line-height: 0.86; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.cond { display: flex; flex-direction: column; gap: calc(var(--u) * 4); font-size: calc(var(--u) * 34); font-weight: 500; white-space: nowrap; }
+.cond svg { display: block; }
+.sub { font-size: calc(var(--u) * 24); color: var(--muted); white-space: nowrap; }
+.sub .lo { color: var(--cool); font-weight: 500; }
+.sub .hi { color: var(--warm); font-weight: 500; }
+.sub .sep { color: var(--dim); padding: 0 calc(var(--u) * 6); }
+
+/* 우천 예보 */
+.rain { grid-area: rain; padding: calc(var(--u) * 22) calc(var(--u) * 28); position: relative; display: flex; flex-direction: column; gap: calc(var(--u) * 8); border: 1px solid transparent; }
+.rain .big { font-size: calc(var(--u) * 46); font-weight: 600; line-height: 1.14; padding-right: calc(var(--u) * 70); }
+.rain .big div { white-space: nowrap; }
+.rain .note { font-size: calc(var(--u) * 22); color: var(--muted); margin-top: auto; white-space: nowrap; }
+.rain .umb { position: absolute; right: calc(var(--u) * 26); top: calc(var(--u) * 20); color: var(--dim); }
+.rain.state-rain { background: var(--rain-bg); border-color: var(--rain-line); }
+.rain.state-rain .label, .rain.state-rain .umb { color: var(--rain); }
+.rain.state-rain .note { color: var(--fg); }
+.rain.state-maybe { border-color: var(--rain-line); border-style: dashed; }
+.rain.state-maybe .label, .rain.state-maybe .umb { color: var(--rain); }
+
+/* 옷차림 */
+.outfit { grid-area: outfit; padding: calc(var(--u) * 22) calc(var(--u) * 28); display: flex; flex-direction: column; gap: calc(var(--u) * 12); }
+.pills { display: flex; flex-wrap: wrap; gap: calc(var(--u) * 8); }
+.pill { font-size: calc(var(--u) * 30); font-weight: 600; padding: calc(var(--u) * 4) calc(var(--u) * 16); border-radius: 999px; background: #1f2b37; white-space: nowrap; }
+.pill.rain { background: var(--rain); color: #06202f; }
+.tips { display: flex; flex-direction: column; gap: calc(var(--u) * 5); margin-top: auto; }
+.tip { font-size: calc(var(--u) * 22); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* 시간대별 */
+.hourly { grid-area: hourly; padding: calc(var(--u) * 12) calc(var(--u) * 14); display: grid; grid-template-columns: repeat(12, 1fr); gap: calc(var(--u) * 4); }
+.slot { display: flex; flex-direction: column; align-items: center; gap: calc(var(--u) * 3); border-radius: calc(var(--u) * 12); padding: calc(var(--u) * 4) 0; min-width: 0; }
+.slot.wet { background: var(--rain-bg); }
+.slot .h { font-size: calc(var(--u) * 20); color: var(--muted); line-height: 1.1; }
+.slot.first .h { color: var(--fg); font-weight: 600; }
+.slot .t { font-family: var(--display); font-size: calc(var(--u) * 34); font-weight: 500; line-height: 1; font-variant-numeric: tabular-nums; }
+.slot .bar { width: calc(var(--u) * 16); height: calc(var(--u) * 42); background: #1b2631; border-radius: calc(var(--u) * 5); display: flex; align-items: flex-end; overflow: hidden; }
+.slot .bar i { display: block; width: 100%; background: var(--dim); border-radius: calc(var(--u) * 5); }
+.slot.wet .bar i { background: var(--rain); }
+.slot .p { font-size: calc(var(--u) * 18); color: var(--muted); line-height: 1; font-variant-numeric: tabular-nums; }
+.slot.wet .p { color: var(--rain); font-weight: 600; }
+.slot .mm { font-size: calc(var(--u) * 15); color: var(--muted); line-height: 1; min-height: calc(var(--u) * 15); }
+
+@media (prefers-reduced-motion: reduce) { .colon { animation: none; } body { transition: none; } }
+</style>
+</head>
+<body>
+<div class="app" id="app">
+  <section class="clock">
+    <div class="time"><span id="hh">--</span><span class="colon">:</span><span id="mm">--</span></div>
+    <div class="dateline">
+      <div class="date" id="date">&nbsp;</div>
+      <div class="meta" id="meta"></div>
+    </div>
+  </section>
+
+  <section class="rain panel" id="rain">
+    <div class="label">우천 예보</div>
+    <div class="big"><div>날씨 불러오는 중</div></div>
+  </section>
+
+  <section class="now" id="now"></section>
+
+  <section class="outfit panel" id="outfit">
+    <div class="label">옷차림</div>
+  </section>
+
+  <section class="hourly panel" id="hourly"></section>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var PLACE = '군자동';
+  var LAT = 37.557, LON = 127.079;
+  var API_URL = 'https://api.open-meteo.com/v1/forecast'
+    + '?latitude=' + LAT + '&longitude=' + LON
+    + '&current=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m,is_day'
+    + '&hourly=temperature_2m,apparent_temperature,precipitation_probability,precipitation,weather_code,wind_speed_10m,is_day'
+    + '&daily=weather_code,temperature_2m_max,temperature_2m_min'
+    + '&timezone=Asia%2FSeoul&forecast_days=2&wind_speed_unit=ms';
+  var CACHE_KEY = 'dressroom-weather-v1';
+  var REFRESH_OK = 15 * 60 * 1000;
+  var REFRESH_FAIL = 2 * 60 * 1000;
+  var SLOTS = 12;
+
+  var state = { data: null, fetchedAt: null, failed: false };
+  var timer = null;
+  var lastMinute = '';
+  var lastHourKey = '';
+
+  function $(id) { return document.getElementById(id); }
+  function pad2(n) { return (n < 10 ? '0' : '') + n; }
+
+  /* ---------- 시간 (항상 서울 기준) ---------- */
+  function seoulNow() {
+    var f = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
+    });
+    var p = {};
+    f.formatToParts(new Date()).forEach(function (x) { p[x.type] = x.value; });
+    return { date: p.year + '-' + p.month + '-' + p.day, hour: parseInt(p.hour, 10) % 24, minute: parseInt(p.minute, 10) };
+  }
+  function addDays(dateStr, n) {
+    var a = dateStr.split('-');
+    var d = new Date(Date.UTC(+a[0], +a[1] - 1, +a[2] + n));
+    return d.getUTCFullYear() + '-' + pad2(d.getUTCMonth() + 1) + '-' + pad2(d.getUTCDate());
+  }
+  function fmtHour(h) {
+    if (h === 0 || h === 24) return '자정';
+    if (h < 12) return '오전 ' + h + '시';
+    if (h === 12) return '낮 12시';
+    return '오후 ' + (h - 12) + '시';
+  }
+  function fmtRange(from, to) {
+    var end = to + 1;
+    if (from === to) return fmtHour(from) + '경';
+    var endText = fmtHour(end);
+    var sameHalf = (from < 12) === (end < 12) && end !== 24 && end !== 12 && from !== 12;
+    if (sameHalf) endText = endText.replace(/^(오전|오후) /, '');
+    return fmtHour(from) + ' ~ ' + endText;
+  }
+  function fmtTemp(v) {
+    var n = Math.round(v);
+    if (n === 0) n = 0;
+    return (n < 0 ? '−' + Math.abs(n) : String(n)) + '°';
+  }
+
+  /* ---------- 날씨 코드 ---------- */
+  var WX = {
+    0: ['맑음', 'clear'], 1: ['대체로 맑음', 'clear'], 2: ['구름 많음', 'partly'], 3: ['흐림', 'cloud'],
+    45: ['안개', 'fog'], 48: ['안개', 'fog'],
+    51: ['약한 이슬비', 'drizzle'], 53: ['이슬비', 'drizzle'], 55: ['강한 이슬비', 'drizzle'],
+    56: ['어는 이슬비', 'drizzle'], 57: ['어는 이슬비', 'drizzle'],
+    61: ['약한 비', 'rain'], 63: ['비', 'rain'], 65: ['강한 비', 'rain'], 66: ['어는 비', 'rain'], 67: ['어는 비', 'rain'],
+    71: ['약한 눈', 'snow'], 73: ['눈', 'snow'], 75: ['강한 눈', 'snow'], 77: ['싸락눈', 'snow'],
+    80: ['약한 소나기', 'rain'], 81: ['소나기', 'rain'], 82: ['강한 소나기', 'rain'],
+    85: ['눈 소나기', 'snow'], 86: ['강한 눈 소나기', 'snow'],
+    95: ['뇌우', 'storm'], 96: ['우박 동반 뇌우', 'storm'], 99: ['우박 동반 뇌우', 'storm']
+  };
+  function wx(code) { return WX[code] || ['-', 'cloud']; }
+  function isWetKind(k) { return k === 'rain' || k === 'drizzle' || k === 'storm' || k === 'snow'; }
+
+  /* ---------- 아이콘 (24x24 선 아이콘) ---------- */
+  var P = {
+    sun: '<circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>',
+    moon: '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>',
+    cloud: '<path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/>',
+    rain: '<path d="M16 13v8M8 13v8M12 15v8M20 16.58A5 5 0 0 0 18 7h-1.26A8 8 0 1 0 4 15.25"/>',
+    drizzle: '<path d="M8 19v2M8 13v2M16 19v2M16 13v2M12 21v2M12 15v2M20 16.58A5 5 0 0 0 18 8h-1.26A8 8 0 1 0 4 15.25"/>',
+    snow: '<path d="M20 17.58A5 5 0 0 0 18 8h-1.26A8 8 0 1 0 4 16.25M8 16h.01M8 20h.01M12 18h.01M12 22h.01M16 16h.01M16 20h.01"/>',
+    storm: '<path d="M19 16.9A5 5 0 0 0 18 7h-1.26a8 8 0 1 0-11.62 9M13 11l-4 6h6l-4 6"/>',
+    fog: '<path d="M4 8h16M2 12h20M4 16h16M7 20h10"/>',
+    umbrella: '<path d="M2 12a10 10 0 0 1 20 0z"/><path d="M12 12v7a2.5 2.5 0 0 1-5 0"/>'
+  };
+  function svg(inner, px, sw) {
+    return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="' + px + '" height="' + px
+      + '" fill="none" stroke="currentColor" stroke-width="' + (sw || 1.6)
+      + '" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + inner + '</svg>';
+  }
+  function icon(kind, isDay, px) {
+    var inner;
+    if (kind === 'clear') inner = isDay ? P.sun : P.moon;
+    else if (kind === 'partly') {
+      var head = isDay
+        ? '<g transform="translate(0,0) scale(.5)">' + P.sun + '</g>'
+        : '<g transform="translate(0,0) scale(.55)">' + P.moon + '</g>';
+      inner = head + '<g transform="translate(8,9) scale(.68)">' + P.cloud + '</g>';
+    }
+    else inner = P[kind] || P.cloud;
+    return svg(inner, px);
+  }
+
+  /* ---------- 분석 ---------- */
+  function idxOf(H, date, h) { return H.time.indexOf(date + 'T' + pad2(h) + ':00'); }
+  function num(v) { return (typeof v === 'number' && isFinite(v)) ? v : 0; }
+
+  var TIERS = [
+    { min: 28, items: ['민소매', '반팔', '반바지'] },
+    { min: 23, items: ['반팔', '얇은 셔츠', '반바지'] },
+    { min: 20, items: ['긴팔', '얇은 가디건', '면바지'] },
+    { min: 17, items: ['얇은 니트', '가디건', '맨투맨'] },
+    { min: 12, items: ['자켓', '가디건', '청바지'] },
+    { min: 9,  items: ['트렌치코트', '야상', '니트'] },
+    { min: 5,  items: ['코트', '니트', '히트텍'] },
+    { min: -100, items: ['패딩', '두꺼운 코트', '목도리', '기모'] }
+  ];
+  function tierFor(t) {
+    for (var i = 0; i < TIERS.length; i++) if (t >= TIERS[i].min) return TIERS[i].items.slice();
+    return TIERS[TIERS.length - 1].items.slice();
+  }
+
+  function analyze(d, now) {
+    var H = d.hourly;
+    var tomorrowMode = now.hour >= 20;
+    var day = tomorrowMode ? addDays(now.date, 1) : now.date;
+    var fromHour = tomorrowMode ? 6 : now.hour;
+
+    // 우천 구간 계산 (오늘 남은 시간, 밤에는 내일 하루)
+    var ranges = [], cur = null, maxProb = 0, peakHour = null, sumMm = 0, anyWindow = false;
+    for (var h = fromHour; h <= 23; h++) {
+      var i = idxOf(H, day, h);
+      if (i < 0) continue;
+      anyWindow = true;
+      var p = num(H.precipitation_probability[i]);
+      var mm = num(H.precipitation[i]);
+      var kind = wx(H.weather_code[i])[1];
+      var wet = p >= 40 || mm >= 0.2 || isWetKind(kind);
+      if (p > maxProb) { maxProb = p; peakHour = h; }
+      sumMm += mm;
+      if (wet) {
+        if (cur && cur.to === h - 1) { cur.to = h; }
+        else { cur = { from: h, to: h, snow: false, rain: false }; ranges.push(cur); }
+        if (kind === 'snow') cur.snow = true; else cur.rain = true;
+      }
+    }
+    var level = 'dry';
+    if (ranges.length) level = (maxProb >= 60 || sumMm >= 1) ? 'rain' : 'maybe';
+
+    // 지금 비가 오는지
+    var cw = wx(d.current.weather_code);
+    var rainingNow = !tomorrowMode && (num(d.current.precipitation) > 0 || isWetKind(cw[1]));
+
+    // 옷차림 기준 온도
+    var commute = tomorrowMode || now.hour < 10;
+    var refDay = tomorrowMode ? day : now.date;
+    var ref, wind, refLabel;
+    if (commute) {
+      var vals = [], winds = [];
+      [8, 9].forEach(function (hh) {
+        var k = idxOf(H, refDay, hh);
+        if (k >= 0) { vals.push(H.apparent_temperature[k]); winds.push(num(H.wind_speed_10m[k])); }
+      });
+      if (vals.length) {
+        ref = vals.reduce(function (a, b) { return a + b; }, 0) / vals.length;
+        wind = Math.max.apply(null, winds);
+      } else { ref = d.current.apparent_temperature; wind = num(d.current.wind_speed_10m); }
+      refLabel = (tomorrowMode ? '내일 ' : '') + '출근길 8~9시 체감 ' + fmtTemp(ref);
+    } else {
+      ref = d.current.apparent_temperature; wind = num(d.current.wind_speed_10m);
+      refLabel = '지금 체감 ' + fmtTemp(ref);
+    }
+    var di = d.daily.time.indexOf(day);
+    var dayMax = di >= 0 ? d.daily.temperature_2m_max[di] : null;
+    var dayMin = di >= 0 ? d.daily.temperature_2m_min[di] : null;
+
+    var pills = tierFor(ref).map(function (t) { return { t: t, rain: false }; });
+    if (ref <= 0 && dayMax !== null && dayMax <= 3) pills.push({ t: '장갑', rain: false });
+    if (wind >= 7 && pills.every(function (x) { return x.t !== '목도리'; })) pills.push({ t: ref < 12 ? '목도리' : '바람막이', rain: false });
+    if (level !== 'dry') pills.push({ t: '우산', rain: true });
+
+    var tips = [];
+    var snowAny = ranges.some(function (r) { return r.snow; });
+    if (snowAny) tips.push('눈 예보 · 미끄럽지 않은 신발');
+    else if (level === 'rain') tips.push('우산 꼭 챙기기');
+    else if (level === 'maybe') tips.push('접이식 우산 있으면 안심');
+    if (dayMax !== null && dayMin !== null && dayMax - dayMin >= 10) {
+      tips.push('일교차 ' + Math.round(dayMax - dayMin) + '° · 벗기 쉬운 겉옷으로 겹쳐 입기');
+    }
+    if (wind >= 7) tips.push('바람 ' + Math.round(wind) + 'm/s · 체감이 더 추워요');
+    if (!tips.length) tips.push(dayMax !== null ? ((tomorrowMode ? '내일' : '오늘') + ' 최고 ' + fmtTemp(dayMax) + ' · 특별한 주의 없음') : '특별한 주의 없음');
+
+    return {
+      tomorrowMode: tomorrowMode, day: day, ranges: ranges, level: level, maxProb: maxProb, peakHour: peakHour,
+      sumMm: sumMm, rainingNow: rainingNow, anyWindow: anyWindow, refLabel: refLabel,
+      pills: pills, tips: tips.slice(0, 3), dayMin: dayMin, dayMax: dayMax, fromHour: fromHour
+    };
+  }
+
+  /* ---------- 그리기 ---------- */
+  function renderNow(d, now) {
+    var c = d.current;
+    var w = wx(c.weather_code);
+    var di = d.daily.time.indexOf(now.date);
+    var lohi = '';
+    if (di >= 0) {
+      lohi = '<span class="lo">최저 ' + fmtTemp(d.daily.temperature_2m_min[di]) + '</span><span class="sep">/</span><span class="hi">최고 ' + fmtTemp(d.daily.temperature_2m_max[di]) + '</span>';
+    }
+    $('now').innerHTML =
+      '<div class="row"><div class="temp">' + fmtTemp(c.temperature_2m) + '</div>'
+      + '<div class="cond">' + icon(w[1], c.is_day === 1, 56) + '<span>' + w[0] + '</span></div></div>'
+      + '<div class="sub">체감 ' + fmtTemp(c.apparent_temperature) + '<span class="sep">·</span>습도 ' + Math.round(c.relative_humidity_2m) + '%<span class="sep">·</span>바람 ' + Math.round(num(c.wind_speed_10m)) + 'm/s</div>'
+      + '<div class="sub">' + lohi + '</div>';
+  }
+
+  function renderRain(a) {
+    var el = $('rain');
+    var scope = a.tomorrowMode ? '내일 ' : '';
+    var label, big, note, cls;
+    if (!a.anyWindow) {
+      cls = 'panel rain state-dry'; label = scope + '우천 예보'; big = '<div>예보 데이터 없음</div>'; note = '다음 갱신을 기다리는 중이에요';
+    } else if (a.level === 'dry') {
+      cls = 'panel rain state-dry'; label = scope + '우천 예보';
+      big = '<div>비 소식 없어요</div>';
+      note = (a.tomorrowMode ? '내일 하루' : '오늘 남은 시간') + ' 강수확률 최대 ' + Math.round(a.maxProb) + '%';
+    } else {
+      cls = 'panel rain state-' + a.level;
+      label = scope + (a.level === 'rain' ? '우천 예보' : '비 올 가능성');
+      var shown = a.ranges.slice(0, 2).map(function (r) {
+        var what = r.snow && r.rain ? '비/눈' : (r.snow ? '눈' : '비');
+        return '<div>' + fmtRange(r.from, r.to) + ' ' + what + (a.level === 'maybe' ? '?' : '') + '</div>';
+      }).join('');
+      if (a.ranges.length > 2) shown += '<div style="font-size:.6em;color:var(--muted)">외 ' + (a.ranges.length - 2) + '구간</div>';
+      big = shown;
+      var parts = ['강수확률 최대 ' + Math.round(a.maxProb) + '%'];
+      if (a.sumMm >= 0.1) parts.push(a.sumMm.toFixed(1) + 'mm');
+      note = parts.join(' · ');
+    }
+    var tag = a.rainingNow ? '<span class="tag">지금 내리는 중</span>' : '';
+    el.className = cls;
+    el.innerHTML = '<div class="label">' + label + tag + '</div><div class="big">' + big + '</div>'
+      + '<div class="note">' + note + '</div><div class="umb">' + svg(P.umbrella, 52, 1.4) + '</div>';
+  }
+
+  function renderOutfit(a) {
+    var title = a.tomorrowMode ? '내일 옷차림' : '오늘 옷차림';
+    var pills = a.pills.map(function (p) { return '<span class="pill' + (p.rain ? ' rain' : '') + '">' + p.t + '</span>'; }).join('');
+    var tips = a.tips.map(function (t) { return '<div class="tip">' + t + '</div>'; }).join('');
+    $('outfit').innerHTML = '<div class="label">' + title + ' <span style="letter-spacing:0;color:var(--dim)">' + a.refLabel + '</span></div>'
+      + '<div class="pills">' + pills + '</div><div class="tips">' + tips + '</div>';
+  }
+
+  function renderHourly(d, a, now) {
+    var H = d.hourly;
+    var start = idxOf(H, a.day, a.fromHour);
+    var html = '';
+    if (start >= 0) {
+      for (var n = 0; n < SLOTS; n++) {
+        var i = start + n;
+        if (i >= H.time.length) break;
+        var hr = parseInt(H.time[i].slice(11, 13), 10);
+        var p = num(H.precipitation_probability[i]);
+        var mm = num(H.precipitation[i]);
+        var k = wx(H.weather_code[i])[1];
+        var wet = p >= 40 || mm >= 0.2 || isWetKind(k);
+        var label = (n === 0 && !a.tomorrowMode) ? '지금' : hr + '시';
+        html += '<div class="slot' + (wet ? ' wet' : '') + (n === 0 ? ' first' : '') + '">'
+          + '<div class="h">' + label + '</div>'
+          + icon(k, H.is_day[i] === 1, 36)
+          + '<div class="t">' + fmtTemp(H.temperature_2m[i]) + '</div>'
+          + '<div class="bar"><i style="height:' + Math.max(p, 3) + '%"></i></div>'
+          + '<div class="p">' + Math.round(p) + '%</div>'
+          + '<div class="mm">' + (mm >= 0.1 ? mm.toFixed(1) + 'mm' : '') + '</div></div>';
+      }
+    }
+    $('hourly').innerHTML = html;
+  }
+
+  function renderMeta() {
+    var el = $('meta');
+    var t = '';
+    if (state.fetchedAt) {
+      var d = new Date(state.fetchedAt);
+      var f = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+      t = f.format(d);
+    }
+    if (state.failed) {
+      el.className = 'meta fail';
+      el.innerHTML = '<span class="dot"></span>갱신 실패' + (t ? ' · 마지막 ' + t : '');
+    } else {
+      el.className = 'meta';
+      el.textContent = PLACE + (t ? ' · ' + t + ' 갱신' : '');
+    }
+  }
+
+  function renderAll() {
+    renderMeta();
+    if (!state.data) return;
+    var now = seoulNow();
+    try {
+      var a = analyze(state.data, now);
+      renderNow(state.data, now);
+      renderRain(a);
+      renderOutfit(a);
+      renderHourly(state.data, a, now);
+    } catch (e) {
+      /* 데이터 형식이 예상과 다르면 마지막 화면을 그대로 둔다 */
+    }
+  }
+
+  /* ---------- 시계 ---------- */
+  var dateFmt = new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', month: 'long', day: 'numeric', weekday: 'long' });
+  function tick() {
+    var n = seoulNow();
+    var m = pad2(n.hour) + ':' + pad2(n.minute);
+    if (m !== lastMinute) {
+      lastMinute = m;
+      $('hh').textContent = pad2(n.hour);
+      $('mm').textContent = pad2(n.minute);
+      var parts = dateFmt.format(new Date()).split(' ');
+      var wd = parts.pop();
+      $('date').innerHTML = '<span>' + parts.join(' ') + '</span> <b>' + wd + '</b>';
+      document.body.classList.toggle('night', n.hour >= 23 || n.hour < 5);
+      var key = n.date + 'T' + n.hour;
+      if (key !== lastHourKey) { lastHourKey = key; renderAll(); }
+    }
+  }
+
+  /* ---------- 데이터 ---------- */
+  function saveCache() {
+    try { localStorage.setItem(CACHE_KEY, JSON.stringify({ at: state.fetchedAt, data: state.data })); } catch (e) {}
+  }
+  function loadCache() {
+    try {
+      var raw = localStorage.getItem(CACHE_KEY);
+      if (!raw) return;
+      var c = JSON.parse(raw);
+      if (c && c.data && c.data.hourly && c.data.current && c.data.daily) { state.data = c.data; state.fetchedAt = c.at; }
+    } catch (e) {}
+  }
+  function schedule(ms) { clearTimeout(timer); timer = setTimeout(refresh, ms); }
+
+  function refresh() {
+    var ctl = ('AbortController' in window) ? new AbortController() : null;
+    var to = setTimeout(function () { if (ctl) ctl.abort(); }, 20000);
+    fetch(API_URL, { cache: 'no-store', signal: ctl ? ctl.signal : undefined })
+      .then(function (r) { if (!r.ok) throw new Error('http ' + r.status); return r.json(); })
+      .then(function (j) {
+        clearTimeout(to);
+        if (!j || !j.hourly || !j.current || !j.daily) throw new Error('shape');
+        state.data = j; state.fetchedAt = Date.now(); state.failed = false;
+        saveCache(); renderAll(); schedule(REFRESH_OK);
+      })
+      .catch(function () {
+        clearTimeout(to);
+        state.failed = true; renderMeta(); schedule(REFRESH_FAIL);
+      });
+  }
+
+  /* ---------- 화면 켜짐 유지 ---------- */
+  var wakeLock = null;
+  function keepAwake() {
+    try {
+      if ('wakeLock' in navigator && !wakeLock) {
+        navigator.wakeLock.request('screen').then(function (l) {
+          wakeLock = l;
+          l.addEventListener('release', function () { wakeLock = null; });
+        }).catch(function () {});
+      }
+    } catch (e) {}
+  }
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible') {
+      keepAwake();
+      if (!state.fetchedAt || Date.now() - state.fetchedAt > 10 * 60 * 1000) refresh();
+      tick();
+    }
+  });
+  document.addEventListener('click', keepAwake);
+
+  /* ---------- 시작 ---------- */
+  loadCache();
+  tick();
+  renderAll();
+  keepAwake();
+  refresh();
+  setInterval(tick, 1000);
+  window.__dressroom = { analyze: analyze, state: state, renderAll: renderAll };
+})();
+</script>
+</body>
+</html>
