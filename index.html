@@ -187,7 +187,16 @@ body.is-dusk .dusk { opacity: 1; }
 .tip { font-size: calc(var(--u) * 19); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* 시간대별 */
-.hourly { grid-area: hourly; padding: calc(var(--u) * 12) calc(var(--u) * 14); display: grid; grid-template-columns: repeat(12, 1fr); gap: calc(var(--u) * 4); }
+.hourly { grid-area: hourly; padding: calc(var(--u) * 12) calc(var(--u) * 14); display: grid; grid-template-columns: minmax(0, 1fr) calc(var(--u) * 58); gap: calc(var(--u) * 10); }
+.slots { display: grid; grid-template-columns: repeat(11, 1fr); gap: calc(var(--u) * 4); min-width: 0; }
+.slots.week { grid-template-columns: repeat(7, 1fr); }
+.slot .h.sat { color: var(--cool); }
+.slot .h.sun { color: var(--warm); }
+.slot .t .sl { color: var(--dim); font-size: 0.8em; padding: 0 0.12em; }
+.slot .t .lo2 { color: var(--cool); font-size: 0.8em; }
+.tog { display: flex; flex-direction: column; gap: calc(var(--u) * 8); }
+.tog button { flex: 1 1 0; font: inherit; font-size: calc(var(--u) * 17); color: var(--dim); background: transparent; border: 1px solid var(--line); border-radius: calc(var(--u) * 12); padding: 0; -webkit-tap-highlight-color: transparent; }
+.tog button.on { background: var(--panel-hi); color: var(--fg); font-weight: 600; border-color: transparent; }
 .slot { display: flex; flex-direction: column; align-items: center; gap: calc(var(--u) * 4); border-radius: calc(var(--u) * 12); padding: calc(var(--u) * 4) 0; min-width: 0; }
 .slot.wet { background: var(--rain-bg); }
 .slot .h { font-size: calc(var(--u) * 17); color: var(--muted); line-height: 1.1; }
@@ -235,7 +244,10 @@ body.is-dusk .dusk { opacity: 1; }
     <div class="label">옷차림</div>
   </section>
 
-  <section class="hourly panel" id="hourly"></section>
+  <section class="hourly panel" id="hourly">
+    <div class="slots" id="slots"></div>
+    <div class="tog" id="tog"><button id="tg-hour" class="on">시간</button><button id="tg-week">주간</button></div>
+  </section>
 </div>
 
 <script>
@@ -248,14 +260,14 @@ body.is-dusk .dusk { opacity: 1; }
     + '?latitude=' + LAT + '&longitude=' + LON
     + '&current=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m,is_day'
     + '&hourly=temperature_2m,apparent_temperature,precipitation_probability,precipitation,weather_code,wind_speed_10m,is_day'
-    + '&daily=weather_code,temperature_2m_max,temperature_2m_min'
-    + '&timezone=Asia%2FSeoul&forecast_days=2&wind_speed_unit=ms';
+    + '&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,precipitation_sum'
+    + '&timezone=Asia%2FSeoul&forecast_days=7&wind_speed_unit=ms';
   var ICAL_SRC = 'https://cdn.jsdelivr.net/npm/ical.js@1.5.0/build/ical.min.js';
-  var CACHE_KEY = 'dressroom-weather-v1';
+  var CACHE_KEY = 'dressroom-weather-v2';
   var CAL_KEY = 'dressroom-cal-url';
   var REFRESH_OK = 15 * 60 * 1000;
   var REFRESH_FAIL = 2 * 60 * 1000;
-  var SLOTS = 12;
+  var SLOTS = 11;
   var MAX_ROWS = 4;
   var DAY_MS = 24 * 3600 * 1000;
 
@@ -264,6 +276,7 @@ body.is-dusk .dusk { opacity: 1; }
   var timer = null, calTimer = null;
   var lastMinute = '';
   var lastHourKey = '';
+  var view = 'hour', viewTimer = null;
 
   function $(id) { return document.getElementById(id); }
   function pad2(n) { return (n < 10 ? '0' : '') + n; }
@@ -553,7 +566,44 @@ body.is-dusk .dusk { opacity: 1; }
           + '<div class="mm">' + (mm >= 0.1 ? mm.toFixed(1) + 'mm' : '') + '</div></div>';
       }
     }
-    $('hourly').innerHTML = html;
+    $('slots').className = 'slots';
+    $('slots').innerHTML = html;
+  }
+
+  var WDAY = ['일', '월', '화', '수', '목', '금', '토'];
+  function renderWeek(d, now) {
+    var D = d.daily, html = '';
+    var start = D.time.indexOf(now.date);
+    if (start < 0) start = 0;
+    var n = Math.min(7, D.time.length - start);
+    for (var j = 0; j < n; j++) {
+      var i = start + j, ds = D.time[i];
+      var k = wx(D.weather_code[i])[1];
+      var p = num(D.precipitation_probability_max && D.precipitation_probability_max[i]);
+      var mm = num(D.precipitation_sum && D.precipitation_sum[i]);
+      var wet = p >= 40 || mm >= 0.2 || isWetKind(k);
+      var a = ds.split('-');
+      var wd = new Date(Date.UTC(+a[0], +a[1] - 1, +a[2])).getUTCDay();
+      var label = j === 0 ? '오늘' : (j === 1 ? '내일' : WDAY[wd] + ' ' + (+a[2]) + '일');
+      var wk = (j > 1 && wd === 6) ? ' sat' : ((j > 1 && wd === 0) ? ' sun' : '');
+      html += '<div class="slot day' + (wet ? ' wet' : '') + (j === 0 ? ' first' : '') + '">'
+        + '<div class="h' + wk + '">' + label + '</div>'
+        + icon(k, true, 30)
+        + '<div class="t">' + fmtTemp(D.temperature_2m_max[i]) + '<span class="sl">/</span><span class="lo2">' + fmtTemp(D.temperature_2m_min[i]) + '</span></div>'
+        + '<div class="bar"><i style="height:' + Math.max(p, 3) + '%"></i></div>'
+        + '<div class="p">' + Math.round(p) + '%</div>'
+        + '<div class="mm">' + (mm >= 0.1 ? mm.toFixed(1) + 'mm' : '') + '</div></div>';
+    }
+    $('slots').className = 'slots week';
+    $('slots').innerHTML = html;
+  }
+  function syncToggle() {
+    $('tg-hour').className = view === 'hour' ? 'on' : '';
+    $('tg-week').className = view === 'week' ? 'on' : '';
+  }
+  function renderSlots(d, a, now) {
+    if (view === 'week') renderWeek(d, now); else renderHourly(d, a, now);
+    syncToggle();
   }
 
   function renderMeta() {
@@ -578,7 +628,7 @@ body.is-dusk .dusk { opacity: 1; }
       renderNow(state.data, now);
       renderRain(a);
       renderOutfit(a);
-      renderHourly(state.data, a, now);
+      renderSlots(state.data, a, now);
     } catch (e) {
       /* 데이터 형식이 예상과 다르면 마지막 화면을 그대로 둔다 */
     }
@@ -769,7 +819,7 @@ body.is-dusk .dusk { opacity: 1; }
       var raw = localStorage.getItem(CACHE_KEY);
       if (!raw) return;
       var c = JSON.parse(raw);
-      if (c && c.data && c.data.hourly && c.data.current && c.data.daily) { state.data = c.data; state.fetchedAt = c.at; }
+      if (c && c.data && c.data.hourly && c.data.current && c.data.daily && c.data.daily.precipitation_probability_max) { state.data = c.data; state.fetchedAt = c.at; }
     } catch (e) {}
   }
   function schedule(ms) { clearTimeout(timer); timer = setTimeout(refresh, ms); }
@@ -822,6 +872,17 @@ body.is-dusk .dusk { opacity: 1; }
       writeCalUrl(''); cal.url = ''; cal.events = null; cal.failed = false; cal.editing = false;
       clearTimeout(calTimer); renderAgenda();
     }
+  });
+
+  // 주간 보기는 1분 뒤 자동으로 시간별로 돌아온다 (벽에 걸어둘 때 우천 정보가 먼저 보이도록)
+  $('tog').addEventListener('click', function (ev) {
+    var id = ev.target && ev.target.id;
+    if (id !== 'tg-hour' && id !== 'tg-week') return;
+    view = id === 'tg-week' ? 'week' : 'hour';
+    clearTimeout(viewTimer);
+    if (view === 'week') viewTimer = setTimeout(function () { view = 'hour'; renderAll(); syncToggle(); }, 60000);
+    renderAll();
+    syncToggle();
   });
 
   /* ---------- 시작 ---------- */
